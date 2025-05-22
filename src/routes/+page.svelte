@@ -1,19 +1,40 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  //import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
   import * as fs from "@tauri-apps/plugin-fs";
   import * as path from "@tauri-apps/api/path";
   import { BaseDirectory } from "@tauri-apps/api/path";
   import { save } from "@tauri-apps/plugin-dialog";
 
+  interface SetupDetail {
+    Category: string;
+    Details: string;
+    BulletPoints: string[];
+  }
+
   interface CommonIssue {
     Question: string;
     Answer: string;
   }
 
-  interface SetupDetail {
-    [key: string]: any;
-  }
+  const MultiplayerType = {
+    None: 0,
+    Local: 1,
+    LAN: 2,
+    Online: 3,
+    Unknown: 4,
+  } as const;
+
+  const CompatibilityStatus = {
+    Perfect: 0,
+    Great: 1,
+    Issues: 2,
+    Unplayable: 3,
+    Unknown: 4,
+  } as const;
+
+  type MultiplayerTypeValue = (typeof MultiplayerType)[keyof typeof MultiplayerType];
+  type CompatibilityStatusValue = (typeof CompatibilityStatus)[keyof typeof CompatibilityStatus];
 
   interface GameEntry {
     Id: string;
@@ -22,26 +43,33 @@
     Description: string;
     IconUrl: string;
     Genre: string;
-    MultiplayerType: number;
+    MultiplayerType: MultiplayerTypeValue;
     MultiplayerDetails: string | null;
-    NvidiaSupport: number;
-    AmdSupport: number;
-    IntelSupport: number;
+    NvidiaSupport: CompatibilityStatusValue;
+    AmdSupport: CompatibilityStatusValue;
+    IntelSupport: CompatibilityStatusValue;
     SetupDetails: SetupDetail[];
     CommonIssues: CommonIssue[];
     FeaturesNotEmulated: string[];
-    OverallStatus: number;
+    OverallStatus: CompatibilityStatusValue;
     [key: string]: any;
   }
 
   const statusMap = {
-    0: "Perfect",
-    1: "Great",
-    2: "Issues",
-    3: "Unplayable",
-    4: "Unknown",
+    [CompatibilityStatus.Perfect]: "Perfect",
+    [CompatibilityStatus.Great]: "Great",
+    [CompatibilityStatus.Issues]: "Issues",
+    [CompatibilityStatus.Unplayable]: "Unplayable",
+    [CompatibilityStatus.Unknown]: "Unknown",
   };
 
+  const multiplayerTypeMap = {
+    [MultiplayerType.None]: "None",
+    [MultiplayerType.Local]: "Local",
+    [MultiplayerType.LAN]: "LAN",
+    [MultiplayerType.Online]: "Online",
+    [MultiplayerType.Unknown]: "Unknown",
+  };
   let items = $state<GameEntry[]>([]);
   let selectedItem = $state<number | null>(null);
 
@@ -135,7 +163,7 @@
   </div>
 
   <div class="flex flex-1 overflow-hidden p-4">
-    <div class="w-1/4 border-r pr-4">
+    <div class="w-1/4 border-r border-base-300 pr-4">
       <div class="h-full overflow-y-auto">
         <ul class="space-y-1" role="listbox" aria-label="Items list">
           {#each items as item, index}
@@ -170,7 +198,7 @@
               <input
                 id="game-id"
                 type="text"
-                class="input input-bordered w-full"
+                class="input input-bordered w-full focus:outline-none"
                 value={items[selectedItem].Id}
                 onchange={(e) => updateField("Id", (e.target as HTMLInputElement).value)}
               />
@@ -183,7 +211,7 @@
               <input
                 id="game-name"
                 type="text"
-                class="input input-bordered w-full"
+                class="input input-bordered w-full focus:outline-none"
                 value={items[selectedItem].Name}
                 onchange={(e) => updateField("Name", (e.target as HTMLInputElement).value)}
               />
@@ -196,7 +224,7 @@
               <input
                 id="hardware"
                 type="text"
-                class="input input-bordered w-full"
+                class="input input-bordered w-full focus:outline-none"
                 value={items[selectedItem].Hardware}
                 onchange={(e) => updateField("Hardware", (e.target as HTMLInputElement).value)}
               />
@@ -209,7 +237,7 @@
               <input
                 id="genre"
                 type="text"
-                class="input input-bordered w-full"
+                class="input input-bordered w-full focus:outline-none"
                 value={items[selectedItem].Genre}
                 onchange={(e) => updateField("Genre", (e.target as HTMLInputElement).value)}
               />
@@ -221,7 +249,7 @@
               </label>
               <select
                 id="overall-status"
-                class="select select-bordered w-full"
+                class="select select-bordered w-full focus:outline-none"
                 value={items[selectedItem].OverallStatus.toString()}
                 onchange={(e) => handleSelectChange(e, "OverallStatus")}
               >
@@ -237,7 +265,7 @@
               </label>
               <select
                 id="nvidia-support"
-                class="select select-bordered w-full"
+                class="select select-bordered w-full focus:outline-none"
                 value={items[selectedItem].NvidiaSupport.toString()}
                 onchange={(e) => handleSelectChange(e, "NvidiaSupport")}
               >
@@ -253,7 +281,7 @@
               </label>
               <select
                 id="amd-support"
-                class="select select-bordered w-full"
+                class="select select-bordered w-full focus:outline-none"
                 value={items[selectedItem].AmdSupport.toString()}
                 onchange={(e) => handleSelectChange(e, "AmdSupport")}
               >
@@ -269,7 +297,7 @@
               </label>
               <select
                 id="intel-support"
-                class="select select-bordered w-full"
+                class="select select-bordered w-full focus:outline-none"
                 value={items[selectedItem].IntelSupport.toString()}
                 onchange={(e) => handleSelectChange(e, "IntelSupport")}
               >
@@ -286,7 +314,7 @@
             </label>
             <textarea
               id="description"
-              class="textarea textarea-bordered h-24"
+              class="textarea textarea-bordered h-24 focus:outline-none"
               value={items[selectedItem].Description}
               onchange={(e) => updateField("Description", (e.target as HTMLTextAreaElement).value)}
             ></textarea>
@@ -299,7 +327,7 @@
             <input
               id="icon-url"
               type="text"
-              class="input input-bordered w-full"
+              class="input input-bordered w-full focus:outline-none"
               value={items[selectedItem].IconUrl}
               onchange={(e: Event) => {
                 const target = e.target as HTMLInputElement;
