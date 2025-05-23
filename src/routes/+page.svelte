@@ -4,7 +4,9 @@
   import * as fs from "@tauri-apps/plugin-fs";
   import * as path from "@tauri-apps/api/path";
   import { BaseDirectory } from "@tauri-apps/api/path";
-  import { save } from "@tauri-apps/plugin-dialog";
+  import { open, save } from "@tauri-apps/plugin-dialog";
+
+  const isDevelopment = import.meta.env.DEV;
 
   interface SetupDetail {
     Category: string;
@@ -77,16 +79,33 @@
     try {
       let jsonContent;
 
-      try {
-        jsonContent = await fs.readTextFile("gameCompatibility.json");
-      } catch {
+      if (isDevelopment) {
+        // Development mode - try to load from known locations
         try {
-          jsonContent = await fetch("/gameCompatibility.json").then((r) => r.text());
+          jsonContent = await fs.readTextFile("gameCompatibility.json");
         } catch {
-          const home = await path.homeDir();
-          const jsonPath = await path.join(home, "gameCompatibility.json");
-          jsonContent = await fs.readTextFile(jsonPath);
+          try {
+            jsonContent = await fetch("/gameCompatibility.json").then((r) => r.text());
+          } catch {
+            const home = await path.homeDir();
+            const jsonPath = await path.join(home, "gameCompatibility.json");
+            jsonContent = await fs.readTextFile(jsonPath);
+          }
         }
+      } else {
+        // Production mode - use file picker
+        const selected = await open({
+          title: "Load Game Compatibility Data",
+          filters: [
+            {
+              name: "JSON Files",
+              extensions: ["json"],
+            },
+          ],
+        });
+
+        if (!selected) return;
+        jsonContent = await fs.readTextFile(selected as string);
       }
 
       const parsedItems = JSON.parse(jsonContent) as GameEntry[];
@@ -133,7 +152,7 @@
     }
   }
 
-  function updateField(field: string, value: any) {
+  function updateField(field: keyof GameEntry, value: any) {
     if (selectedItem !== null) {
       items[selectedItem][field] = value;
     }
@@ -143,6 +162,56 @@
     const target = e.target as HTMLSelectElement;
     if (target && target.value) {
       updateField(field, parseInt(target.value));
+    }
+  }
+
+  function addArrayItem(field: keyof GameEntry, template: any = "") {
+    if (selectedItem !== null) {
+      const currentArray = [...items[selectedItem][field]];
+      currentArray.push(template);
+      updateField(field, currentArray);
+    }
+  }
+
+  function removeArrayItem(field: keyof GameEntry, index: number) {
+    if (selectedItem !== null) {
+      const currentArray = [...items[selectedItem][field]];
+      currentArray.splice(index, 1);
+      updateField(field, currentArray);
+    }
+  }
+
+  function updateArrayItem(field: keyof GameEntry, index: number, value: any) {
+    if (selectedItem !== null) {
+      const currentArray = [...items[selectedItem][field]];
+      currentArray[index] = value;
+      updateField(field, currentArray);
+    }
+  }
+
+  function updateBulletPoint(setupIndex: number, bulletIndex: number, value: string) {
+    if (selectedItem !== null) {
+      const setupDetails = [...items[selectedItem].SetupDetails];
+      const bulletPoints = [...setupDetails[setupIndex].BulletPoints];
+      bulletPoints[bulletIndex] = value;
+      setupDetails[setupIndex].BulletPoints = bulletPoints;
+      updateField("SetupDetails", setupDetails);
+    }
+  }
+
+  function addBulletPoint(setupIndex: number) {
+    if (selectedItem !== null) {
+      const setupDetails = [...items[selectedItem].SetupDetails];
+      setupDetails[setupIndex].BulletPoints.push("");
+      updateField("SetupDetails", setupDetails);
+    }
+  }
+
+  function removeBulletPoint(setupIndex: number, bulletIndex: number) {
+    if (selectedItem !== null) {
+      const setupDetails = [...items[selectedItem].SetupDetails];
+      setupDetails[setupIndex].BulletPoints.splice(bulletIndex, 1);
+      updateField("SetupDetails", setupDetails);
     }
   }
 
@@ -244,6 +313,22 @@
             </div>
 
             <div class="form-control">
+              <label class="label" for="multiplayer-type">
+                <span class="label-text">Multiplayer Type</span>
+              </label>
+              <select
+                id="multiplayer-type"
+                class="select select-bordered w-full focus:outline-none"
+                value={items[selectedItem].MultiplayerType.toString()}
+                onchange={(e) => handleSelectChange(e, "MultiplayerType")}
+              >
+                {#each Object.entries(multiplayerTypeMap) as [value, label]}
+                  <option {value}>{label}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="form-control">
               <label class="label" for="overall-status">
                 <span class="label-text">Overall Status</span>
               </label>
@@ -314,7 +399,7 @@
             </label>
             <textarea
               id="description"
-              class="textarea textarea-bordered h-24 focus:outline-none"
+              class="textarea textarea-bordered w-full h-24 focus:outline-none"
               value={items[selectedItem].Description}
               onchange={(e) => updateField("Description", (e.target as HTMLTextAreaElement).value)}
             ></textarea>
@@ -334,6 +419,235 @@
                 if (target) updateField("IconUrl", target.value);
               }}
             />
+          </div>
+
+          <div class="form-control">
+            <label class="label" for="multiplayer-details">
+              <span class="label-text">Multiplayer Details</span>
+            </label>
+            <input
+              id="multiplayer-details"
+              type="text"
+              class="input input-bordered w-full focus:outline-none"
+              value={items[selectedItem].MultiplayerDetails || ""}
+              onchange={(e) =>
+                updateField("MultiplayerDetails", (e.target as HTMLInputElement).value)}
+            />
+          </div>
+
+          <!-- Setup Details Section -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text font-bold">Setup Details</span>
+              <button
+                class="btn btn-sm btn-outline"
+                onclick={() =>
+                  addArrayItem("SetupDetails", { Category: "", Details: "", BulletPoints: [] })}
+              >
+                Add Setup Detail
+              </button>
+            </label>
+
+            {#if items[selectedItem].SetupDetails.length === 0}
+              <p class="text-gray-500 italic">No setup details added</p>
+            {:else}
+              {#each items[selectedItem].SetupDetails as setup, setupIndex}
+                <div class="card bg-base-200 shadow-sm p-4 mb-4">
+                  <div class="flex justify-between items-center mb-2">
+                    <h3 class="font-semibold">Setup Detail #{setupIndex + 1}</h3>
+                    <button
+                      class="btn btn-sm btn-error"
+                      onclick={() => removeArrayItem("SetupDetails", setupIndex)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+
+                  <div class="form-control mb-2">
+                    <label class="label" for={`setup-category-${setupIndex}`}>
+                      <span class="label-text">Category</span>
+                    </label>
+                    <input
+                      id={`setup-category-${setupIndex}`}
+                      type="text"
+                      class="input input-bordered w-full focus:outline-none"
+                      value={setup.Category}
+                      onchange={(e) => {
+                        const updatedSetup = {
+                          ...setup,
+                          Category: (e.target as HTMLInputElement).value,
+                        };
+                        updateArrayItem("SetupDetails", setupIndex, updatedSetup);
+                      }}
+                    />
+                  </div>
+
+                  <div class="form-control mb-2">
+                    <label class="label" for={`setup-details-${setupIndex}`}>
+                      <span class="label-text">Details</span>
+                    </label>
+                    <textarea
+                      id={`setup-details-${setupIndex}`}
+                      class="textarea textarea-bordered w-full h-20 focus:outline-none"
+                      value={setup.Details}
+                      onchange={(e) => {
+                        const updatedSetup = {
+                          ...setup,
+                          Details: (e.target as HTMLTextAreaElement).value,
+                        };
+                        updateArrayItem("SetupDetails", setupIndex, updatedSetup);
+                      }}
+                    ></textarea>
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label">
+                      <span class="label-text">Bullet Points</span>
+                      <button
+                        class="btn btn-sm btn-outline"
+                        onclick={() => addBulletPoint(setupIndex)}
+                      >
+                        Add Point
+                      </button>
+                    </label>
+
+                    {#if setup.BulletPoints.length === 0}
+                      <p class="text-gray-500 italic">No bullet points added</p>
+                    {:else}
+                      {#each setup.BulletPoints as point, bulletIndex}
+                        <div class="flex gap-2 mb-2">
+                          <input
+                            type="text"
+                            class="input input-bordered w-full focus:outline-none"
+                            value={point}
+                            onchange={(e) =>
+                              updateBulletPoint(
+                                setupIndex,
+                                bulletIndex,
+                                (e.target as HTMLInputElement).value
+                              )}
+                          />
+                          <button
+                            class="btn btn-sm btn-error"
+                            onclick={() => removeBulletPoint(setupIndex, bulletIndex)}
+                          >
+                            -
+                          </button>
+                        </div>
+                      {/each}
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            {/if}
+          </div>
+
+          <!-- Common Issues Section -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text font-bold">Common Issues</span>
+              <button
+                class="btn btn-sm btn-outline"
+                onclick={() => addArrayItem("CommonIssues", { Question: "", Answer: "" })}
+              >
+                Add Issue
+              </button>
+            </label>
+
+            {#if items[selectedItem].CommonIssues.length === 0}
+              <p class="text-gray-500 italic">No common issues added</p>
+            {:else}
+              {#each items[selectedItem].CommonIssues as issue, issueIndex}
+                <div class="card bg-base-200 shadow-sm p-4 mb-4">
+                  <div class="flex justify-between items-center mb-2">
+                    <h3 class="font-semibold">Issue #{issueIndex + 1}</h3>
+                    <button
+                      class="btn btn-sm btn-error"
+                      onclick={() => removeArrayItem("CommonIssues", issueIndex)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+
+                  <div class="form-control mb-2">
+                    <label class="label" for="issue-question">
+                      <span class="label-text">Question</span>
+                    </label>
+                    <input
+                      id="issue-question"
+                      type="text"
+                      class="input input-bordered w-full focus:outline-none"
+                      value={issue.Question}
+                      onchange={(e) => {
+                        const updatedIssue = {
+                          ...issue,
+                          Question: (e.target as HTMLInputElement).value,
+                        };
+                        updateArrayItem("CommonIssues", issueIndex, updatedIssue);
+                      }}
+                    />
+                  </div>
+
+                  <div class="form-control">
+                    <label class="label" for="issue-answer">
+                      <span class="label-text">Answer</span>
+                    </label>
+                    <textarea
+                      id="issue-answer"
+                      class="textarea textarea-bordered w-full h-20 focus:outline-none"
+                      value={issue.Answer}
+                      onchange={(e) => {
+                        const updatedIssue = {
+                          ...issue,
+                          Answer: (e.target as HTMLTextAreaElement).value,
+                        };
+                        updateArrayItem("CommonIssues", issueIndex, updatedIssue);
+                      }}
+                    ></textarea>
+                  </div>
+                </div>
+              {/each}
+            {/if}
+          </div>
+
+          <!-- Features Not Emulated Section -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text font-bold">Features Not Emulated</span>
+              <button
+                class="btn btn-sm btn-outline"
+                onclick={() => addArrayItem("FeaturesNotEmulated", "")}
+              >
+                Add Feature
+              </button>
+            </label>
+
+            {#if items[selectedItem].FeaturesNotEmulated.length === 0}
+              <p class="text-gray-500 italic">No features listed</p>
+            {:else}
+              {#each items[selectedItem].FeaturesNotEmulated as feature, featureIndex}
+                <div class="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    class="input input-bordered w-full focus:outline-none"
+                    value={feature}
+                    onchange={(e) => {
+                      if (selectedItem !== null) {
+                        const updatedFeatures = [...items[selectedItem].FeaturesNotEmulated];
+                        updatedFeatures[featureIndex] = (e.target as HTMLInputElement).value;
+                        updateField("FeaturesNotEmulated", updatedFeatures);
+                      }
+                    }}
+                  />
+                  <button
+                    class="btn btn-sm btn-error"
+                    onclick={() => removeArrayItem("FeaturesNotEmulated", featureIndex)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              {/each}
+            {/if}
           </div>
         </div>
       {:else}
