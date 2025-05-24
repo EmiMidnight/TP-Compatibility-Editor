@@ -1,12 +1,39 @@
 <script lang="ts">
-  //import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
   import * as fs from "@tauri-apps/plugin-fs";
   import * as path from "@tauri-apps/api/path";
-  import { BaseDirectory } from "@tauri-apps/api/path";
-  import { open, save } from "@tauri-apps/plugin-dialog";
+  import { open, save, ask } from "@tauri-apps/plugin-dialog";
 
-  const isDevelopment = import.meta.env.DEV;
+  // Toast system
+  interface Toast {
+    id: string;
+    message: string;
+    type: "success" | "error" | "info" | "warning";
+    duration?: number;
+  }
+
+  let toasts = $state<Toast[]>([]);
+
+  function showToast(message: string, type: Toast["type"] = "info", duration = 6000) {
+    const id = Date.now().toString();
+    const toast: Toast = { id, message, type, duration };
+
+    toasts = [...toasts, toast];
+
+    if (duration > 0) {
+      setTimeout(() => {
+        removeToast(id);
+      }, duration);
+    }
+  }
+
+  function removeToast(id: string) {
+    toasts = toasts.filter((t) => t.id !== id);
+  }
+
+  interface AppConfig {
+    lastUsedPath?: string;
+  }
 
   interface SetupDetail {
     Category: string;
@@ -72,28 +99,59 @@
     [MultiplayerType.Online]: "Online",
     [MultiplayerType.Unknown]: "Unknown",
   };
+
   let items = $state<GameEntry[]>([]);
   let selectedItem = $state<number | null>(null);
+  let currentFilePath = $state<string | null>(null);
+
+  async function loadAppConfig(): Promise<AppConfig> {
+    try {
+      const configPath = await path.join(await path.appConfigDir(), "config.json");
+      const configContent = await fs.readTextFile(configPath);
+      return JSON.parse(configContent);
+    } catch {
+      return {};
+    }
+  }
+
+  async function saveAppConfig(config: AppConfig) {
+    try {
+      const configDir = await path.appConfigDir();
+      await fs.mkdir(configDir, { recursive: true });
+      const configPath = await path.join(configDir, "config.json");
+      await fs.writeTextFile(configPath, JSON.stringify(config, null, 2));
+    } catch (error) {
+      console.error("Failed to save app config:", error);
+    }
+  }
 
   async function loadJsonData() {
     try {
       let jsonContent;
+      let filePath: string | null = null;
 
-      if (isDevelopment) {
-        // Development mode - try to load from known locations
+      const config = await loadAppConfig();
+
+      if (config.lastUsedPath) {
         try {
-          jsonContent = await fs.readTextFile("gameCompatibility.json");
+          jsonContent = await fs.readTextFile(config.lastUsedPath);
+          filePath = config.lastUsedPath;
         } catch {
-          try {
-            jsonContent = await fetch("/gameCompatibility.json").then((r) => r.text());
-          } catch {
-            const home = await path.homeDir();
-            const jsonPath = await path.join(home, "gameCompatibility.json");
-            jsonContent = await fs.readTextFile(jsonPath);
-          }
+          const selected = await open({
+            title: "Load Game Compatibility Data",
+            filters: [
+              {
+                name: "JSON Files",
+                extensions: ["json"],
+              },
+            ],
+          });
+
+          if (!selected) return;
+          jsonContent = await fs.readTextFile(selected as string);
+          filePath = selected as string;
         }
       } else {
-        // Production mode - use file picker
         const selected = await open({
           title: "Load Game Compatibility Data",
           filters: [
@@ -106,38 +164,71 @@
 
         if (!selected) return;
         jsonContent = await fs.readTextFile(selected as string);
+        filePath = selected as string;
+      }
+
+      if (filePath) {
+        currentFilePath = filePath;
+        await saveAppConfig({ lastUsedPath: filePath });
       }
 
       const parsedItems = JSON.parse(jsonContent) as GameEntry[];
       items = parsedItems.sort((a, b) => a.Name.localeCompare(b.Name));
+      showToast("Data loaded successfully", "success");
     } catch (error) {
       console.error("Failed to load JSON data:", error);
+      showToast("Failed to load data", "error");
     }
   }
 
   async function saveJsonData() {
+    if (!currentFilePath) {
+      await saveAsJsonData();
+      return;
+    }
+
+    await saveToCurrentPath();
+  }
+
+  async function saveToCurrentPath() {
+    if (!currentFilePath) {
+      await saveAsJsonData();
+      return;
+    }
+
     try {
       const jsonContent = JSON.stringify(items, null, 2);
-      const path = await save({
+      await fs.writeTextFile(currentFilePath, jsonContent);
+      showToast("Data saved successfully", "success");
+    } catch (error) {
+      console.error("Failed to save JSON data:", error);
+      showToast("Failed to save data", "error");
+    }
+  }
+
+  async function saveAsJsonData() {
+    try {
+      const jsonContent = JSON.stringify(items, null, 2);
+      const selectedPath = await save({
         title: "Save Game Compatibility Data",
         defaultPath: "gameCompatibility.json",
         filters: [
           {
-            name: "gameCompatibility.json",
+            name: "JSON Files",
             extensions: ["json"],
           },
         ],
       });
-      if (!path) {
-        return;
-      }
-      await fs.writeTextFile(path, jsonContent, {
-        baseDir: BaseDirectory.AppConfig,
-      });
-      alert("Data saved successfully");
+
+      if (!selectedPath) return;
+
+      await fs.writeTextFile(selectedPath, jsonContent);
+      currentFilePath = selectedPath;
+      await saveAppConfig({ lastUsedPath: selectedPath });
+      showToast("Data saved successfully", "success");
     } catch (error) {
       console.error("Failed to save JSON data:", error);
-      alert("Failed to save data");
+      showToast("Failed to save data", "error");
     }
   }
 
@@ -224,10 +315,16 @@
   <div class="navbar bg-base-100 shadow-sm">
     <div class="flex-1">
       <p class="btn btn-ghost text-xl">TP Compatibility Editor</p>
+      {#if currentFilePath}
+        <span class="text-sm text-gray-500 ml-4">
+          Current: {currentFilePath.split("/").pop() || currentFilePath.split("\\").pop()}
+        </span>
+      {/if}
     </div>
-    <div class="flex-none">
+    <div class="flex-none gap-2">
       <button class="btn btn-soft btn-info" onclick={loadJsonData}> Load Data </button>
-      <button class="btn btn-soft btn-success" onclick={saveJsonData}> Save Data </button>
+      <button class="btn btn-soft btn-success" onclick={saveJsonData}> Save </button>
+      <button class="btn btn-soft btn-outline" onclick={saveAsJsonData}> Save As </button>
     </div>
   </div>
 
@@ -435,7 +532,6 @@
             />
           </div>
 
-          <!-- Setup Details Section -->
           <div class="form-control">
             <label class="label">
               <span class="label-text font-bold">Setup Details</span>
@@ -542,7 +638,6 @@
             {/if}
           </div>
 
-          <!-- Common Issues Section -->
           <div class="form-control">
             <label class="label">
               <span class="label-text font-bold">Common Issues</span>
@@ -610,7 +705,6 @@
             {/if}
           </div>
 
-          <!-- Features Not Emulated Section -->
           <div class="form-control">
             <label class="label">
               <span class="label-text font-bold">Features Not Emulated</span>
@@ -655,23 +749,25 @@
       {/if}
     </div>
   </div>
+  <div class="toast-container fixed top-0 right-0 p-4">
+    {#each toasts as toast (toast.id)}
+      <div class="toast mb-2" style="min-width: 250px;">
+        <div class="alert alert-{toast.type} shadow-lg">
+          <div class="flex justify-between items-center">
+            <div class="flex-1">
+              <p class="font-semibold">{toast.message}</p>
+            </div>
+            <button class="btn btn-sm btn-ghost" onclick={() => removeToast(toast.id)}> ✕ </button>
+          </div>
+        </div>
+      </div>
+    {/each}
+  </div>
+
+  <div class="hidden">
+    <div class="alert-success"></div>
+    <div class="alert-error"></div>
+    <div class="alert-warning"></div>
+    <div class="alert-info"></div>
+  </div>
 </main>
-
-<style>
-  ul {
-    list-style-type: none;
-    padding: 0;
-  }
-
-  .form-control {
-    margin-bottom: 0.5rem;
-  }
-
-  .label {
-    padding: 0.25rem 0;
-  }
-
-  .label-text {
-    font-weight: 500;
-  }
-</style>

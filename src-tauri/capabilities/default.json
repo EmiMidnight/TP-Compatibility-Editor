@@ -9,6 +9,8 @@
     "core:default",
     "opener:default",
     "fs:allow-write-text-file",
+    "fs:allow-read-text-file",
+    "fs:allow-mkdir",
     "core:path:default",
     {
       "identifier": "fs:scope-data",
