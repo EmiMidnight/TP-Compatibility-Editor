@@ -1,6 +1,6 @@
-# Tauri + SvelteKit + TypeScript
-
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+# TP Compatibility editor
+This is a simple tauri + sveltekit based tool to give you a GUI to edit the TP compatibility json, while keeping its format as best as possible to
+help keep merge requests clean.
 
 ## Recommended IDE Setup
 
