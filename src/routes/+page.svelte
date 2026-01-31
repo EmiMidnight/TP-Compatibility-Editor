@@ -81,6 +81,7 @@
     CommonIssues: CommonIssue[];
     FeaturesNotEmulated: string[];
     OverallStatus: CompatibilityStatusValue;
+    DevOnly: boolean;
     [key: string]: any;
   }
 
@@ -173,6 +174,13 @@
       }
 
       const parsedItems = JSON.parse(jsonContent) as GameEntry[];
+      
+      parsedItems.forEach((item) => {
+        if (item.DevOnly === undefined) {
+          item.DevOnly = false;
+        }
+      });
+      
       items = parsedItems.sort((a, b) => a.Name.localeCompare(b.Name));
       showToast("Data loaded successfully", "success");
     } catch (error) {
@@ -487,6 +495,19 @@
                   <option {value}>{label}</option>
                 {/each}
               </select>
+            </div>
+
+            <div class="form-control">
+              <label class="label cursor-pointer justify-start gap-2" for="dev-only">
+                <input
+                  id="dev-only"
+                  type="checkbox"
+                  class="checkbox"
+                  checked={items[selectedItem].DevOnly}
+                  onchange={(e) => updateField("DevOnly", (e.target as HTMLInputElement).checked)}
+                />
+                <span class="label-text">Dev Only</span>
+              </label>
             </div>
           </div>
 
